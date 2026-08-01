@@ -1,0 +1,61 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { nextRunAt, jitterSeconds, accountMissed } from '../src/lib/schedule.js'
+import { validateRoutine } from '../src/lib/routines.js'
+import { classifyOutcome } from '../src/lib/outcome.js'
+import { assemblePreamble } from '../src/lib/preamble.js'
+import { applyFailurePolicy } from '../src/lib/failure.js'
+
+const base = validateRoutine('daily', { name: 'Daily', agent: 'stubagent', prompt: 'work', trigger: { kind: 'cron', expr: '0 9 * * *', tz: 'America/New_York' } })
+
+test('cron respects timezone and deterministic jitter', () => {
+  const first = nextRunAt(base, new Date('2026-01-15T13:59:00Z'))
+  assert.equal(first.getUTCHours(), 14)
+  assert.equal(first.getUTCSeconds(), jitterSeconds('daily'))
+  assert.equal(jitterSeconds('daily'), jitterSeconds('daily'))
+})
+
+test('cron crosses DST', () => {
+  const before = nextRunAt(base, new Date('2026-03-07T15:00:00Z'))
+  const after = nextRunAt(base, before)
+  assert.equal(after.getUTCHours(), 13)
+})
+
+test('missed intervals aggregate once', () => {
+  const routine = validateRoutine('i', { name: 'I', agent: 'a', prompt: 'p', trigger: { kind: 'interval', every: '1h' } })
+  const result = accountMissed(routine, '2026-01-01T00:00:00Z', new Date('2026-01-01T03:01:00Z'))
+  assert.equal(result.missedCount, 4)
+})
+
+test('validation rejects unknowns and unsupported session target', () => {
+  assert.throws(() => validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', wat: 1, trigger: { kind: 'manual' } }), /unknown key/)
+  assert.throws(() => validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', trigger: { kind: 'manual' }, run: { target: 'session:key' } }), /not in v1/)
+})
+
+test('outcome matrix', () => {
+  assert.equal(classifyOutcome({ status: 'idle', tail: 'ROUTINE_OK', okToken: 'ROUTINE_OK' }), 'ok')
+  assert.equal(classifyOutcome({ status: 'idle', tail: 'plain', okToken: 'OK' }), 'ok_untagged')
+  assert.equal(classifyOutcome({ status: 'idle', tail: 'ROUTINE_NOOP', noopToken: 'ROUTINE_NOOP' }), 'noop')
+  assert.equal(classifyOutcome({ error: new Error('dead') }), 'fail')
+  assert.equal(classifyOutcome({ waitTimedOut: true }), 'timeout')
+  assert.equal(classifyOutcome({ status: 'blocked' }), 'blocked')
+})
+
+test('preamble includes memory, prior run, watch and payload', () => {
+  const routine = validateRoutine('w', { name: 'W', agent: 'a', prompt: 'scan', trigger: { kind: 'watch', every: '1h' } })
+  const text = assemblePreamble({ routine, runNumber: 2, lastRun: { status: 'ok', ts: 'then', summary: 'done' }, notesPath: '/notes/w.md', payload: { value: 1 } })
+  assert.match(text, /read it first/)
+  assert.match(text, /nothing meaningful changed/)
+  assert.match(text, /"value": 1/)
+})
+
+test('failure policy thresholds, renotify and auto pause', () => {
+  const config = { notify_after: 3, renotify_hours: 8, auto_pause_after_days: 7 }
+  let result = applyFailurePolicy({}, 'fail', config, new Date('2026-01-01T00:00:00Z'))
+  result = applyFailurePolicy(result.state, 'fail', config, new Date('2026-01-01T01:00:00Z'))
+  result = applyFailurePolicy(result.state, 'fail', config, new Date('2026-01-01T02:00:00Z'))
+  assert.equal(result.shouldNotifyFailure, true)
+  result = applyFailurePolicy(result.state, 'fail', config, new Date('2026-01-08T01:00:00Z'))
+  assert.equal(result.didAutoPause, true)
+  assert.equal(applyFailurePolicy(result.state, 'ok', config).state.failureStreak, 0)
+})

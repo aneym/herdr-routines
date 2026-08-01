@@ -1,0 +1,19 @@
+{
+  "name": "herdr-routines",
+  "version": "0.1.0",
+  "description": "Scheduled agent routines for herdr",
+  "type": "module",
+  "bin": {
+    "herdr-routines": "bin/herdr-routines"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "dependencies": {
+    "croner": "^10.0.1",
+    "smol-toml": "^1.7.1"
+  }
+}

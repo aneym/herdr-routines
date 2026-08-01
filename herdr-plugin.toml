@@ -1,0 +1,11 @@
+id = "herdr-routines"
+name = "Herdr Routines"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+description = "Scheduled agent routines for herdr"
+
+[[build]]
+command = ["npm", "install", "--omit=dev"]
+
+[[startup]]
+command = ["node", "src/daemon.js"]

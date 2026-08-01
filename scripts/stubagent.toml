@@ -1,0 +1,29 @@
+id = "stubagent"
+version = "1.0.0"
+min_engine_version = 2
+updated_at = "2026-08-01T00:00:00Z"
+
+[[rules]]
+id = "blocked"
+state = "blocked"
+priority = 100
+region = "whole_recent"
+visible_blocker = true
+contains = ["waiting for approval"]
+
+[[rules]]
+id = "idle"
+state = "idle"
+priority = 50
+region = "whole_recent"
+visible_idle = true
+contains = ["stub>"]
+
+[[rules]]
+id = "working"
+state = "working"
+priority = 10
+region = "whole_recent"
+visible_working = true
+contains = ["STUBAGENT READY"]
+not = [{ contains = ["stub>"] }]
