@@ -28,12 +28,14 @@ export class RoutineDaemon {
     this.server = null
     this.httpServer = null
     this.isStopping = false
+    this.lastLogs = new Map()
   }
 
   async initialize() {
     await fs.mkdir(this.paths.runsDir, { recursive: true })
     await fs.mkdir(this.paths.notesDir, { recursive: true })
     this.state = await loadState(this.paths.stateFile)
+    await this.reconcileOrphans()
     await this.reload(true)
     await this.startControlServer()
     await this.startHttpServer()
@@ -42,7 +44,29 @@ export class RoutineDaemon {
   }
 
   async log(id, message) {
+    const key = `${id}:${message}`
+    const now = Date.now()
+    if (now - (this.lastLogs.get(key) || 0) < 60000) return
+    this.lastLogs.set(key, now)
     await logLine(this.paths.logFile, id, message)
+  }
+
+  async reconcileOrphans() {
+    let markers = []
+    try { markers = JSON.parse(await fs.readFile(this.paths.inFlightFile, 'utf8')) }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+    for (const marker of markers) {
+      const state = this.state.routines[marker.routine_id] ||= {}
+      state.failureStreak = (state.failureStreak || 0) + 1
+      state.failingSince ||= new Date().toISOString()
+      await appendRun(this.paths.runsDir, { ...marker, ts: new Date().toISOString(), status: 'orphaned', duration_ms: Date.now() - new Date(marker.started_at).getTime(), summary: 'daemon exited during run' })
+    }
+    if (markers.length) await saveState(this.paths.stateFile, this.state)
+    await fs.writeFile(this.paths.inFlightFile, '[]\n')
+  }
+
+  async saveMarkers(markers) {
+    await fs.writeFile(this.paths.inFlightFile, `${JSON.stringify(markers, null, 2)}\n`)
   }
 
   async reload(isStartup = false) {
@@ -76,7 +100,10 @@ export class RoutineDaemon {
       const due = new Date(this.state.routines[id]?.nextRunAt || 0).getTime()
       if (due > 0) earliest = Math.min(earliest, due)
     }
-    if (earliest !== Infinity) this.timer = setTimeout(() => this.tick().catch((error) => this.log('', error.message)), Math.max(0, earliest - Date.now()))
+    if (earliest !== Infinity) {
+      const delay = Math.min(2147483647, Math.max(0, earliest - Date.now()))
+      this.timer = setTimeout(() => this.tick().catch((error) => this.log('', error.message)), delay)
+    }
   }
 
   async tick() {
@@ -108,16 +135,22 @@ export class RoutineDaemon {
     const runNumber = (routineState.runCount || 0) + 1
     const runId = crypto.randomUUID()
     routineState.runCount = runNumber
+    const marker = { run_id: runId, routine_id: id, trigger, started_at: new Date().toISOString() }
+    await this.saveMarkers([marker])
+    await saveState(this.paths.stateFile, this.state)
     try {
       const result = await executeRun({ session: this.session, routine, runId, runNumber, lastRun: runs.at(-1), notesPath: path.join(this.paths.notesDir, `${id}.md`), payload })
-      const failureDecision = applyFailurePolicy(routineState, result.status, routine.failure)
-      this.state.routines[id] = { ...routineState, ...failureDecision.state }
-      const record = { ts: new Date().toISOString(), run_id: runId, routine_id: id, trigger, status: result.status, duration_ms: result.durationMs, summary: result.summary, output_tail: result.outputTail, workspace_id: result.workspaceId, tab_id: result.tabId, pane_id: result.paneId, next_run_at: routineState.nextRunAt || null }
+      Object.assign(marker, { workspace_id: result.workspaceId, tab_id: result.tabId, pane_id: result.paneId })
+      const liveState = this.state.routines[id] ||= {}
+      const failureDecision = applyFailurePolicy(liveState, result.status, routine.failure)
+      Object.assign(liveState, failureDecision.state)
+      const record = { ts: new Date().toISOString(), run_id: runId, routine_id: id, trigger, status: result.status, duration_ms: result.durationMs, summary: result.summary, output_tail: result.outputTail, workspace_id: result.workspaceId, tab_id: result.tabId, pane_id: result.paneId, next_run_at: liveState.nextRunAt || null }
       await appendRun(this.paths.runsDir, record)
       await this.log(id, `${trigger} ${result.status} run=${runId}`)
       if (shouldNotify(routine, result.status, failureDecision)) await notify(this.session, routine, result.status, result.durationMs)
       await this.applyRetention(routine)
       await saveState(this.paths.stateFile, this.state)
+      await this.saveMarkers([])
       return record
     } finally {
       this.running.delete(id)
@@ -178,6 +211,7 @@ export class RoutineDaemon {
     try { await fs.unlink(this.paths.socketPath) } catch (error) { if (error.code !== 'ENOENT') throw error }
     this.server = net.createServer({ allowHalfOpen: true }, (socket) => {
       let text = ''
+      socket.on('error', () => {})
       socket.setEncoding('utf8')
       socket.on('data', (chunk) => { text += chunk })
       socket.on('end', async () => {
@@ -185,7 +219,9 @@ export class RoutineDaemon {
         catch (error) { socket.end(`${JSON.stringify({ ok: false, error: error.message })}\n`) }
       })
     })
+    this.server.on('error', (error) => this.log('', `ctl server: ${error.message}`))
     await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.paths.socketPath, resolve) })
+    await fs.writeFile(this.paths.socketMapFile, `${this.paths.socketPath}\n`)
   }
 
   async startHttpServer() {
@@ -193,6 +229,8 @@ export class RoutineDaemon {
       const config = parse(await fs.readFile(path.join(this.paths.configDir, '_daemon.toml'), 'utf8'))
       if (!config.http?.port) return
       this.httpServer = http.createServer(async (request, response) => {
+        request.on('error', () => {})
+        response.on('error', () => {})
         const match = /^\/fire\/([^/]+)$/.exec(request.url || '')
         if (request.method !== 'POST' || !match) { response.writeHead(404).end(); return }
         let body = ''

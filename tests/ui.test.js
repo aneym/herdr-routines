@@ -45,7 +45,7 @@ test('help documents keyboard verbs', () => {
 
 test('manager interaction toggles pause and refreshes row state', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-ui-live-'))
-  const paths = { ...getPaths('ui-live'), configDir: path.join(root, 'config'), stateDir: path.join(root, 'state'), runsDir: path.join(root, 'state/runs'), notesDir: path.join(root, 'state/notes'), stateFile: path.join(root, 'state/state.json'), socketPath: path.join(root, 'ctl.sock'), logFile: path.join(root, 'state/daemon.log') }
+  const paths = { ...getPaths('ui-live'), configDir: path.join(root, 'config'), stateDir: path.join(root, 'state'), runsDir: path.join(root, 'state/runs'), notesDir: path.join(root, 'state/notes'), stateFile: path.join(root, 'state/state.json'), socketPath: path.join(root, 'ctl.sock'), socketMapFile: path.join(root, 'state/ctl.sock.path'), inFlightFile: path.join(root, 'state/in-flight.json'), logFile: path.join(root, 'state/daemon.log') }
   await fs.mkdir(paths.configDir, { recursive: true })
   await fs.writeFile(path.join(paths.configDir, 'sample.toml'), 'name="Sample"\nagent="stubagent"\nprompt="p"\n[trigger]\nkind="manual"\n')
   const { RoutineDaemon } = await import('../src/daemon.js')

@@ -81,7 +81,11 @@ try {
     const routine = { name: flags.name, agent: flags.agent, prompt, enabled: !flags.disabled, trigger: triggerFromFlags(flags), run: { target: flags.target || 'isolated', workspace: flags.workspace || '⚡ routines', cwd: flags.cwd || '~' }, delivery: { notify: flags.notify || 'always' } }
     console.log(await writeRoutine(paths.configDir, id, routine, flags.force))
   } else if (command === 'edit') {
-    await openEditor(path.join(paths.configDir, `${id}.toml`))
+    const file = path.join(paths.configDir, `${id}.toml`)
+    await openEditor(file)
+    const raw = parse(await fs.readFile(file, 'utf8'))
+    const { validateRoutine } = await import('../src/lib/routines.js')
+    validateRoutine(id, raw)
   } else if (command === 'enable' || command === 'disable') {
     const file = path.join(paths.configDir, `${id}.toml`)
     const raw = parse(await fs.readFile(file, 'utf8'))

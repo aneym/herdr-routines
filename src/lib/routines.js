@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { parse, stringify } from 'smol-toml'
+import { Cron } from 'croner'
 
 const ROOT_KEYS = new Set(['name', 'agent', 'prompt', 'enabled', 'trigger', 'run', 'delivery', 'failure', 'fire'])
 const SECTION_KEYS = {
@@ -31,7 +32,11 @@ export function validateRoutine(id, input) {
   for (const [section, keys] of Object.entries(SECTION_KEYS)) rejectUnknown(input[section], keys, `${section}.`)
   for (const key of ['name', 'agent', 'prompt']) if (!input[key] || typeof input[key] !== 'string') throw new Error(`${key} is required`)
   if (!input.trigger || !['cron', 'interval', 'at', 'watch', 'manual'].includes(input.trigger.kind)) throw new Error('invalid trigger.kind')
-  if (input.trigger.kind === 'cron' && !input.trigger.expr) throw new Error('trigger.expr is required')
+  if (input.trigger.kind === 'cron') {
+    if (!input.trigger.expr) throw new Error('trigger.expr is required')
+    try { new Cron(input.trigger.expr, { timezone: input.trigger.tz, paused: true }).nextRun() }
+    catch (error) { throw new Error(`invalid cron or timezone: ${error.message}`) }
+  }
   if (['interval', 'watch'].includes(input.trigger.kind)) parseDuration(input.trigger.every)
   if (input.trigger.kind === 'at' && Number.isNaN(new Date(input.trigger.when).getTime())) throw new Error('invalid trigger.when')
   const target = input.run?.target || 'isolated'
@@ -91,6 +96,7 @@ export async function writeRoutine(configDir, id, routine, force = false) {
   if (!force) {
     try { await fs.access(file); throw new Error(`routine already exists: ${id}`) } catch (error) { if (error.code !== 'ENOENT') throw error }
   }
+  validateRoutine(id, routine)
   await fs.writeFile(file, stringify(routine))
   return file
 }

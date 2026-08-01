@@ -40,7 +40,7 @@ export HERDR_SESSION="$SESSION" HERDR_ROUTINES_CONFIG_DIR="$CONFIG" HERDR_ROUTIN
 export HERDR_ROUTINES_ROSTER="$ROSTER" STUBAGENT_CAPTURE="$CAPTURE" HERDR_ROUTINES_STUB_MODE=1
 "$ROOT/bin/herdr-routines" create ok --name Ok --agent stubagent --prompt CASE_OK --at 2099-01-01T00:00:00Z --notify always
 node "$ROOT/src/daemon.js" > "$WORK/daemon.out" 2>&1 & DAEMON_PID=$!
-for _ in $(seq 1 100); do [[ -S "$STATE/ctl.sock" ]] && break; sleep .1; done
+for _ in $(seq 1 100); do [[ -S "$(cat "$STATE/ctl.sock.path" 2>/dev/null)" ]] && break; sleep .1; done
 "$ROOT/bin/herdr-routines" run ok > "$WORK/ok.json"
 node -e "const x=require('$WORK/ok.json'); if(x.status!=='ok'||!x.workspace_id||!x.tab_id||!x.pane_id)process.exit(1)"
 "$HERDR" --session "$SESSION" tab get "$(node -p "require('$WORK/ok.json').tab_id")" >/dev/null
@@ -96,7 +96,7 @@ const fs=require('fs');const p='$STATE/state.json';const x=JSON.parse(fs.readFil
 PY
 before=$(grep -c '"status":"ok"' "$STATE/runs/ok.jsonl" || true)
 node "$ROOT/src/daemon.js" > "$WORK/daemon2.out" 2>&1 & DAEMON_PID=$!
-for _ in $(seq 1 100); do [[ -S "$STATE/ctl.sock" ]] && break; sleep .1; done
+for _ in $(seq 1 100); do [[ -S "$(cat "$STATE/ctl.sock.path" 2>/dev/null)" ]] && break; sleep .1; done
 sleep .5
 after=$(grep -c '"status":"ok"' "$STATE/runs/ok.jsonl" || true)
 [[ "$before" = "$after" ]]
@@ -105,7 +105,9 @@ after=$(grep -c '"status":"ok"' "$STATE/runs/ok.jsonl" || true)
 # Control protocol and overlap record are asserted without starting another agent.
 node - <<'JS'
 import net from 'node:net'
-const socket=net.createConnection(process.env.HERDR_ROUTINES_STATE_DIR+'/ctl.sock')
+const fs = await import('node:fs/promises')
+const socketPath = (await fs.readFile(process.env.HERDR_ROUTINES_STATE_DIR+'/ctl.sock.path','utf8')).trim()
+const socket=net.createConnection(socketPath)
 let data='';socket.setEncoding('utf8');socket.on('connect',()=>socket.end('{"cmd":"status"}\n'));socket.on('data',x=>data+=x);socket.on('end',()=>{if(!JSON.parse(data).ok)process.exit(1)})
 JS
 printf 'e2e PASS session=%s outcomes=6 retention=PASS missed=PASS payload=PASS\n' "$SESSION"
