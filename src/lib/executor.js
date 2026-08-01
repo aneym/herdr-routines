@@ -51,9 +51,17 @@ async function readTail(session, paneId) {
   }
 }
 
+// If the agent never leaves idle, the prompt may be sitting unsubmitted in the
+// agent's composer (paste landed, Enter lost — observed live with Claude Code).
+// Nudge with bare Enter presses (harmless on an empty composer), then give up.
+const START_NUDGE_DELAYS_MS = [8000, 16000]
+const START_DEADLINE_MS = 60000
+
 export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200 }) {
   const deadline = Date.now() + timeoutMs
+  const startedAt = Date.now()
   let hasStarted = false
+  let nudgesSent = 0
   while (Date.now() < deadline) {
     try {
       await herdrRequest(session, 'pane.get', { pane_id: paneId })
@@ -67,6 +75,14 @@ export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200 }) {
       if (status === 'blocked') return { status }
       if (status === 'done') return { status }
       if (hasStarted && status === 'idle') return { status }
+      if (!hasStarted) {
+        const waited = Date.now() - startedAt
+        if (nudgesSent < START_NUDGE_DELAYS_MS.length && waited >= START_NUDGE_DELAYS_MS[nudgesSent]) {
+          nudgesSent += 1
+          await herdrRequest(session, 'pane.send_keys', { pane_id: paneId, keys: ['Enter'] }).catch(() => {})
+        }
+        if (waited >= START_DEADLINE_MS) return { error: new Error('prompt never started (agent stayed idle)') }
+      }
     } catch (error) {
       if (/not found|exited|closed|ENOENT|ECONNREFUSED/i.test(error.message)) return { error: new Error('agent exited') }
       throw error
