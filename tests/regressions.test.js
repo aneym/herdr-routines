@@ -69,6 +69,29 @@ test('startup reconciles in-flight markers as orphaned', async (t) => {
   t.after(async () => { await daemon.stop(); await fs.rm(root, { recursive: true, force: true }) })
 })
 
+test('concurrent markers merge and both reconcile as orphaned', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-concurrent-orphan-'))
+  const paths = fixturePaths(root)
+  await fs.mkdir(paths.runsDir, { recursive: true })
+  await fs.mkdir(paths.configDir, { recursive: true })
+  const daemon = new RoutineDaemon({ session: 'repair', paths })
+  await daemon.initialize()
+  await Promise.all([
+    daemon.addMarker({ run_id: 'first-run', routine_id: 'first', trigger: 'manual', started_at: new Date().toISOString() }),
+    daemon.addMarker({ run_id: 'second-run', routine_id: 'second', trigger: 'manual', started_at: new Date().toISOString() }),
+  ])
+  const markers = JSON.parse(await fs.readFile(paths.inFlightFile, 'utf8'))
+  assert.deepEqual(new Set(markers.map((marker) => marker.run_id)), new Set(['first-run', 'second-run']))
+  await daemon.stop()
+  const restarted = new RoutineDaemon({ session: 'repair', paths })
+  await restarted.initialize()
+  for (const id of ['first', 'second']) {
+    assert.match(await fs.readFile(path.join(paths.runsDir, `${id}.jsonl`), 'utf8'), /"status":"orphaned"/)
+    assert.equal(restarted.state.routines[id].failureStreak, 1)
+  }
+  t.after(async () => { await restarted.stop(); await fs.rm(root, { recursive: true, force: true }) })
+})
+
 test('ctl disconnect during response does not kill daemon', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-epipe-'))
   const paths = fixturePaths(root)

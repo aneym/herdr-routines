@@ -29,6 +29,8 @@ export class RoutineDaemon {
     this.httpServer = null
     this.isStopping = false
     this.lastLogs = new Map()
+    this.markers = new Map()
+    this.markerWrite = Promise.resolve()
   }
 
   async initialize() {
@@ -55,6 +57,7 @@ export class RoutineDaemon {
     let markers = []
     try { markers = JSON.parse(await fs.readFile(this.paths.inFlightFile, 'utf8')) }
     catch (error) { if (error.code !== 'ENOENT') throw error }
+    this.markers = new Map(markers.map((marker) => [marker.run_id, marker]))
     for (const marker of markers) {
       const state = this.state.routines[marker.routine_id] ||= {}
       state.failureStreak = (state.failureStreak || 0) + 1
@@ -62,11 +65,23 @@ export class RoutineDaemon {
       await appendRun(this.paths.runsDir, { ...marker, ts: new Date().toISOString(), status: 'orphaned', duration_ms: Date.now() - new Date(marker.started_at).getTime(), summary: 'daemon exited during run' })
     }
     if (markers.length) await saveState(this.paths.stateFile, this.state)
-    await fs.writeFile(this.paths.inFlightFile, '[]\n')
+    this.markers.clear()
+    await this.persistMarkers()
   }
 
-  async saveMarkers(markers) {
-    await fs.writeFile(this.paths.inFlightFile, `${JSON.stringify(markers, null, 2)}\n`)
+  async persistMarkers() {
+    this.markerWrite = this.markerWrite.then(() => fs.writeFile(this.paths.inFlightFile, `${JSON.stringify([...this.markers.values()], null, 2)}\n`))
+    await this.markerWrite
+  }
+
+  async addMarker(marker) {
+    this.markers.set(marker.run_id, marker)
+    await this.persistMarkers()
+  }
+
+  async removeMarker(runId) {
+    this.markers.delete(runId)
+    await this.persistMarkers()
   }
 
   async reload(isStartup = false) {
@@ -136,7 +151,7 @@ export class RoutineDaemon {
     const runId = crypto.randomUUID()
     routineState.runCount = runNumber
     const marker = { run_id: runId, routine_id: id, trigger, started_at: new Date().toISOString() }
-    await this.saveMarkers([marker])
+    await this.addMarker(marker)
     await saveState(this.paths.stateFile, this.state)
     try {
       const result = await executeRun({ session: this.session, routine, runId, runNumber, lastRun: runs.at(-1), notesPath: path.join(this.paths.notesDir, `${id}.md`), payload })
@@ -150,7 +165,7 @@ export class RoutineDaemon {
       if (shouldNotify(routine, result.status, failureDecision)) await notify(this.session, routine, result.status, result.durationMs)
       await this.applyRetention(routine)
       await saveState(this.paths.stateFile, this.state)
-      await this.saveMarkers([])
+      await this.removeMarker(runId)
       return record
     } finally {
       this.running.delete(id)
