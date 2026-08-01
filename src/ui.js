@@ -4,10 +4,12 @@ import net from 'node:net'
 import path from 'node:path'
 import readline from 'node:readline'
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { getPaths } from './lib/paths.js'
 import { loadRoutines } from './lib/routines.js'
 import { loadState } from './lib/state.js'
 import { readRuns } from './lib/runstore.js'
+import { herdrRequest } from './lib/herdr.js'
 
 const ESC = '\x1b'
 const CLEAR = `${ESC}[2J${ESC}[H`
@@ -87,6 +89,12 @@ export function renderList(model, columns = 80) {
   return lines.join('\n')
 }
 
+export function renderRun(item, runIndex) {
+  const run = item.runs.slice(-20).reverse()[runIndex]
+  if (!run) return `${SECONDARY}run unavailable${RESET}`
+  return `${INK}${item.routine?.name || item.id} · ${run.status}${RESET}\n${run.ts} · ${run.duration_ms || 0}ms\nlocation ${run.workspace_id || '-'} / ${run.tab_id || '-'} / ${run.pane_id || '-'}\n\n${run.output_tail || run.summary || 'no recorded output'}\n\n${SECONDARY}Esc back  f focus live pane${RESET}`
+}
+
 export function renderDetail(item, columns = 80) {
   const routine = item.routine
   if (!routine) return `${BAD}${item.id}: ${item.invalid}${RESET}\n\nEsc back`
@@ -138,6 +146,7 @@ export class Manager {
     this.isDaemonDown = false
     this.message = ''
     this.pendingDelete = null
+    this.runSelected = 0
   }
 
   async refresh() {
@@ -155,7 +164,7 @@ export class Manager {
 
   render() {
     const model = { items: this.items, selected: this.selected, filter: this.filter, isDaemonDown: this.isDaemonDown }
-    const text = this.view === 'help' ? renderHelp() : this.view === 'detail' ? renderDetail(this.items[this.selected], this.output.columns || 80) : renderList(model, this.output.columns || 80)
+    const text = this.view === 'help' ? renderHelp() : this.view === 'run' ? renderRun(this.items[this.selected], this.runSelected) : this.view === 'detail' ? renderDetail(this.items[this.selected], this.output.columns || 80) : renderList(model, this.output.columns || 80)
     this.output.write(`${CLEAR}${text}${this.message ? `\n${ACCENT}${this.message}${RESET}` : ''}`)
   }
 
@@ -165,9 +174,16 @@ export class Manager {
     if (key === 'q' || key === '') return false
     if (key === '?') this.view = this.view === 'help' ? 'list' : 'help'
     else if (key === '' || key === 'escape') this.view = 'list'
-    else if (key === '\r' || key === 'enter') this.view = 'detail'
-    else if (key === 'j' || key === 'down') this.selected = Math.min(this.items.length - 1, this.selected + 1)
-    else if (key === 'k' || key === 'up') this.selected = Math.max(0, this.selected - 1)
+    else if (key === '\r' || key === 'enter') {
+      if (this.view === 'detail' && item?.runs.length) this.view = 'run'
+      else this.view = 'detail'
+    } else if (key === 'j' || key === 'down') {
+      if (this.view === 'detail') this.runSelected = Math.min((item?.runs.length || 1) - 1, this.runSelected + 1)
+      else this.selected = Math.min(this.items.length - 1, this.selected + 1)
+    } else if (key === 'k' || key === 'up') {
+      if (this.view === 'detail') this.runSelected = Math.max(0, this.runSelected - 1)
+      else this.selected = Math.max(0, this.selected - 1)
+    }
     else if (key === 'R') await this.refresh()
     else if (key === '/' && process.stdin.isTTY) {
       process.stdin.setRawMode(false)
@@ -175,8 +191,14 @@ export class Manager {
       process.stdin.setRawMode(true)
     } else if (key === ' ' && item && !this.isDaemonDown) await control(this.paths.socketPath, { cmd: item.state.paused ? 'resume' : 'pause', id: item.id })
     else if (key === 'r' && item && !this.isDaemonDown) { control(this.paths.socketPath, { cmd: 'run', id: item.id }).catch(() => {}); this.message = 'run started' }
-    else if (key === 'l' && item) this.message = item.runs.at(-1)?.output_tail || item.runs.at(-1)?.summary || 'no output'
-    else if (key === 'e' && item) await openEditor(path.join(this.paths.configDir, `${item.id}.toml`))
+    else if (key === 'l' && item) { this.runSelected = 0; this.view = 'run' }
+    else if (key === 'f' && this.view === 'run' && item) {
+      const run = item.runs.slice(-20).reverse()[this.runSelected]
+      if (run?.pane_id) {
+        try { await herdrRequest(process.env.HERDR_SESSION || 'default', 'pane.focus', { pane_id: run.pane_id }); this.message = 'focused live pane' }
+        catch { this.message = 'pane no longer alive' }
+      }
+    } else if (key === 'e' && item) await openEditor(path.join(this.paths.configDir, `${item.id}.toml`))
     else if (key === 'm' && item) await openEditor(path.join(this.paths.notesDir, `${item.id}.md`))
     else if (key === 'n') this.message = 'Create conversationally via an agent, or run: herdr-routines create …'
     else if (key === 'd' && item) { this.pendingDelete = item.id; this.message = `Delete ${item.id}? press y` }
@@ -186,7 +208,7 @@ export class Manager {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || '')) {
   const manager = new Manager()
   await manager.refresh()
   manager.render()

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { renderList, renderDetail, renderHelp, Manager } from '../src/ui.js'
+import { renderList, renderDetail, renderRun, renderHelp, Manager } from '../src/ui.js'
 import { getPaths } from '../src/lib/paths.js'
 
 const routine = { name: 'Daily scan', agent: 'stubagent', prompt: 'Find changes\nand report them.', trigger: { kind: 'cron', expr: '0 9 * * *', tz: 'America/New_York' }, run: { target: 'isolated', workspace: 'routines' } }
@@ -29,6 +29,13 @@ test('detail renders definition, exact prompt, and run history', () => {
   assert.match(text, /cron 0 9 \* \* \*/)
   assert.match(text, /Find changes\nand report them\./)
   assert.match(text, /done/)
+})
+
+test('run drill-in renders output and pane location', () => {
+  const item = { ...items[2], runs: [{ ...items[2].runs[0], pane_id: 'w2:p3', tab_id: 'w2:t3', workspace_id: 'w2', output_tail: 'captured output' }] }
+  const text = renderRun(item, 0)
+  assert.match(text, /w2:p3/)
+  assert.match(text, /captured output/)
 })
 
 test('help documents keyboard verbs', () => {
