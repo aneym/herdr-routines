@@ -163,7 +163,7 @@ export async function executeRun(context) {
   return {
     status,
     durationMs: Date.now() - started,
-    summary: error ? error.message.slice(0, 200) : lastMeaningfulLine(tail),
+    summary: error ? error.message.slice(0, 200) : lastMeaningfulLine(tail, 200, [routine.delivery.ok_token, routine.delivery.noop_token]),
     outputTail: tail.slice(-8000),
     workspaceId,
     tabId,

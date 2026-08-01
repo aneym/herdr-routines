@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { nextRunAt, jitterSeconds, accountMissed } from '../src/lib/schedule.js'
 import { validateRoutine } from '../src/lib/routines.js'
-import { classifyOutcome } from '../src/lib/outcome.js'
+import { classifyOutcome, lastMeaningfulLine } from '../src/lib/outcome.js'
 import { assemblePreamble } from '../src/lib/preamble.js'
 import { applyFailurePolicy } from '../src/lib/failure.js'
 import { monitorRun } from '../src/lib/executor.js'
@@ -70,4 +70,33 @@ test('failure policy thresholds, renotify and auto pause', () => {
   result = applyFailurePolicy(result.state, 'fail', config, new Date('2026-01-08T01:00:00Z'))
   assert.equal(result.didAutoPause, true)
   assert.equal(applyFailurePolicy(result.state, 'ok', config).state.failureStreak, 0)
+})
+
+// Regression: real Claude Code pane — token mid-tail, TUI chrome after the
+// reply, and the echoed prompt mentioning the token mid-sentence (2026-08-01
+// live smoke misclassified this as ok_untagged).
+test('classifyOutcome finds token above TUI chrome, ignores echoed prompt', () => {
+  const tail = [
+    '❯ [herdr routine: disk-watch]',
+    '  End your reply with ROUTINE_OK if all good, ROUTINE_NOOP if there was nothing to do, or a short failure summary',
+    '  otherwise.',
+    '  ...update your notes with today\'s numbers and end with',
+    '  ROUTINE_NOOP. Never delete anything; report only.',
+    '⏺ Disk health check done — both metrics are within thresholds.',
+    '  ROUTINE_NOOP',
+    '✻ Churned for 38s · 2 messages hidden (/focus to show)',
+    '───────────────',
+    '❯',
+    '───────────────',
+    '  ○○○○○ 8% │ Fable 5 │ $1.98 │ ⎇ main',
+    '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+  ].join('\n')
+  assert.equal(
+    classifyOutcome({ status: 'idle', tail, okToken: 'ROUTINE_OK', noopToken: 'ROUTINE_NOOP' }),
+    'noop'
+  )
+  assert.equal(
+    lastMeaningfulLine(tail, 200, ['ROUTINE_OK', 'ROUTINE_NOOP']),
+    '⏺ Disk health check done — both metrics are within thresholds.'
+  )
 })
