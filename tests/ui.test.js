@@ -31,6 +31,13 @@ test('detail renders definition, exact prompt, and run history', () => {
   assert.match(text, /done/)
 })
 
+test('detail and run output scroll through long content', () => {
+  const longItem = { ...items[2], routine: { ...routine, prompt: Array.from({ length: 40 }, (_, index) => `prompt-${index}`).join('\n') }, runs: [{ ...items[2].runs[0], output_tail: Array.from({ length: 40 }, (_, index) => `output-${index}`).join('\n') }] }
+  assert.match(renderDetail(longItem, 80, 20, 10), /prompt-2[0-9]/)
+  assert.doesNotMatch(renderDetail(longItem, 80, 20, 10), /prompt-0\n/)
+  assert.match(renderRun(longItem, 0, 20, 10), /output-2[0-9]/)
+})
+
 test('run drill-in renders output and pane location', () => {
   const item = { ...items[2], runs: [{ ...items[2].runs[0], pane_id: 'w2:p3', tab_id: 'w2:t3', workspace_id: 'w2', output_tail: 'captured output' }] }
   const text = renderRun(item, 0)
@@ -72,6 +79,12 @@ test('manager file mode shows daemon down and deletes with confirmation', async 
   const manager = new Manager({ paths, output: { columns: 80, write() {} } })
   await manager.refresh()
   assert.equal(manager.isDaemonDown, true)
+  await manager.handle(' ')
+  assert.equal((await fs.readFile(path.join(paths.configDir, 'sample.toml'), 'utf8')).includes('enabled = false'), true)
+  await manager.handle('d')
+  assert.equal(manager.message.includes('y/N'), true)
+  await manager.handle('x')
+  assert.equal(manager.pendingDelete, null)
   await manager.handle('d')
   await manager.handle('y')
   await assert.rejects(fs.access(path.join(paths.configDir, 'sample.toml')))

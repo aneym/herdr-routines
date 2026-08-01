@@ -23,8 +23,9 @@ test('ctl socket remains short for a deeply nested state directory', () => {
   else process.env.HERDR_ROUTINES_STATE_DIR = old
 })
 
-test('invalid timezone is rejected while far-future schedules are valid', () => {
+test('invalid timezone and oversized prompt are rejected while far-future schedules are valid', () => {
   assert.throws(() => validateRoutine('bad', { name: 'Bad', agent: 'a', prompt: 'p', trigger: { kind: 'cron', expr: '0 9 * * *', tz: 'Not/AZone' } }), /invalid cron or timezone/)
+  assert.throws(() => validateRoutine('large', { name: 'Large', agent: 'a', prompt: 'x'.repeat(256 * 1024 + 1), trigger: { kind: 'manual' } }), /256KB/)
   assert.doesNotThrow(() => validateRoutine('future', { name: 'Future', agent: 'a', prompt: 'p', trigger: { kind: 'at', when: '2099-01-01T00:00:00Z' } }))
   assert.doesNotThrow(() => validateRoutine('cron', { name: 'Cron', agent: 'a', prompt: 'p', trigger: { kind: 'cron', expr: '0 0 1 1 *' } }))
 })

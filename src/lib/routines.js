@@ -4,6 +4,7 @@ import { parse, stringify } from 'smol-toml'
 import { Cron } from 'croner'
 
 const ROOT_KEYS = new Set(['name', 'agent', 'prompt', 'enabled', 'trigger', 'run', 'delivery', 'failure', 'fire'])
+const MAX_PROMPT_BYTES = 256 * 1024
 const SECTION_KEYS = {
   trigger: new Set(['kind', 'expr', 'tz', 'every', 'when']),
   run: new Set(['target', 'workspace', 'cwd', 'overlap', 'timeout_minutes', 'keep_runs', 'busy']),
@@ -31,6 +32,7 @@ export function validateRoutine(id, input) {
   rejectUnknown(input, ROOT_KEYS, '')
   for (const [section, keys] of Object.entries(SECTION_KEYS)) rejectUnknown(input[section], keys, `${section}.`)
   for (const key of ['name', 'agent', 'prompt']) if (!input[key] || typeof input[key] !== 'string') throw new Error(`${key} is required`)
+  if (Buffer.byteLength(input.prompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('prompt exceeds 256KB limit')
   if (!input.trigger || !['cron', 'interval', 'at', 'watch', 'manual'].includes(input.trigger.kind)) throw new Error('invalid trigger.kind')
   if (input.trigger.kind === 'cron') {
     if (!input.trigger.expr) throw new Error('trigger.expr is required')

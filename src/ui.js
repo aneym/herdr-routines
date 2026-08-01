@@ -6,7 +6,8 @@ import readline from 'node:readline'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { getPaths } from './lib/paths.js'
-import { loadRoutines } from './lib/routines.js'
+import { loadRoutines, validateRoutine } from './lib/routines.js'
+import { parse, stringify } from 'smol-toml'
 import { loadState } from './lib/state.js'
 import { readRuns } from './lib/runstore.js'
 import { herdrRequest } from './lib/herdr.js'
@@ -89,13 +90,20 @@ export function renderList(model, columns = 80) {
   return lines.join('\n')
 }
 
-export function renderRun(item, runIndex) {
-  const run = item.runs.slice(-20).reverse()[runIndex]
-  if (!run) return `${SECONDARY}run unavailable${RESET}`
-  return `${INK}${item.routine?.name || item.id} · ${run.status}${RESET}\n${run.ts} · ${run.duration_ms || 0}ms\nlocation ${run.workspace_id || '-'} / ${run.tab_id || '-'} / ${run.pane_id || '-'}\n\n${run.output_tail || run.summary || 'no recorded output'}\n\n${SECONDARY}Esc back  f focus live pane${RESET}`
+function sliceViewport(text, offset, rows) {
+  const lines = text.split('\n')
+  const maxOffset = Math.max(0, lines.length - rows)
+  return lines.slice(Math.min(offset, maxOffset), Math.min(offset, maxOffset) + rows).join('\n')
 }
 
-export function renderDetail(item, columns = 80) {
+export function renderRun(item, runIndex, offset = 0, rows = 24) {
+  const run = item.runs.slice(-20).reverse()[runIndex]
+  if (!run) return `${SECONDARY}run unavailable${RESET}`
+  const body = `${INK}${item.routine?.name || item.id} · ${run.status}${RESET}\n${run.ts} · ${run.duration_ms || 0}ms\nlocation ${run.workspace_id || '-'} / ${run.tab_id || '-'} / ${run.pane_id || '-'}\n\n${run.output_tail || run.summary || 'no recorded output'}`
+  return `${sliceViewport(body, offset, Math.max(3, rows - 2))}\n\n${SECONDARY}↑↓ scroll  Esc back  f focus live pane${RESET}`
+}
+
+export function renderDetail(item, columns = 80, offset = 0, rows = 30) {
   const routine = item.routine
   if (!routine) return `${BAD}${item.id}: ${item.invalid}${RESET}\n\nEsc back`
   const last = item.runs.at(-1)
@@ -110,8 +118,8 @@ export function renderDetail(item, columns = 80) {
     '', `${ACCENT}RUNS${RESET}`,
   ]
   for (const run of item.runs.slice(-20).reverse()) lines.push(`${run.status.padEnd(16)} ${relativeTime(run.ts).padEnd(10)} ${String(run.duration_ms || 0).padStart(6)}ms  ${(run.summary || '').slice(0, Math.max(5, columns - 45))}`)
-  lines.push('', `${SECONDARY}Esc back  space pause  r run  l output  e edit  m notes  d delete  ? help${RESET}`)
-  return lines.join('\n')
+  lines.push('', `${SECONDARY}↑↓ scroll  enter selected run  Esc back  space pause  r run  l output  e edit  m notes  d delete${RESET}`)
+  return sliceViewport(lines.join('\n'), offset, rows)
 }
 
 export function renderHelp() {
@@ -147,6 +155,7 @@ export class Manager {
     this.message = ''
     this.pendingDelete = null
     this.runSelected = 0
+    this.scrollOffset = 0
   }
 
   async refresh() {
@@ -164,24 +173,27 @@ export class Manager {
 
   render() {
     const model = { items: this.items, selected: this.selected, filter: this.filter, isDaemonDown: this.isDaemonDown }
-    const text = this.view === 'help' ? renderHelp() : this.view === 'run' ? renderRun(this.items[this.selected], this.runSelected) : this.view === 'detail' ? renderDetail(this.items[this.selected], this.output.columns || 80) : renderList(model, this.output.columns || 80)
+    const rows = this.output.rows || 30
+    const text = this.view === 'help' ? renderHelp() : this.view === 'run' ? renderRun(this.items[this.selected], this.runSelected, this.scrollOffset, rows) : this.view === 'detail' ? renderDetail(this.items[this.selected], this.output.columns || 80, this.scrollOffset, rows) : renderList(model, this.output.columns || 80)
     this.output.write(`${CLEAR}${text}${this.message ? `\n${ACCENT}${this.message}${RESET}` : ''}`)
   }
 
   async handle(key) {
     const item = this.items[this.selected]
     this.message = ''
+    if (this.pendingDelete && key !== 'y') this.pendingDelete = null
     if (key === 'q' || key === '') return false
     if (key === '?') this.view = this.view === 'help' ? 'list' : 'help'
     else if (key === '' || key === 'escape') this.view = 'list'
     else if (key === '\r' || key === 'enter') {
+      this.scrollOffset = 0
       if (this.view === 'detail' && item?.runs.length) this.view = 'run'
       else this.view = 'detail'
     } else if (key === 'j' || key === 'down') {
-      if (this.view === 'detail') this.runSelected = Math.min((item?.runs.length || 1) - 1, this.runSelected + 1)
+      if (this.view === 'detail' || this.view === 'run') this.scrollOffset += 1
       else this.selected = Math.min(this.items.length - 1, this.selected + 1)
     } else if (key === 'k' || key === 'up') {
-      if (this.view === 'detail') this.runSelected = Math.max(0, this.runSelected - 1)
+      if (this.view === 'detail' || this.view === 'run') this.scrollOffset = Math.max(0, this.scrollOffset - 1)
       else this.selected = Math.max(0, this.selected - 1)
     }
     else if (key === 'R') await this.refresh()
@@ -190,6 +202,14 @@ export class Manager {
       this.filter = await new Promise((resolve) => readline.createInterface({ input: process.stdin, output: this.output }).question('filter: ', resolve))
       process.stdin.setRawMode(true)
     } else if (key === ' ' && item && !this.isDaemonDown) await control(this.paths.socketPath, { cmd: item.state.paused ? 'resume' : 'pause', id: item.id })
+    else if (key === ' ' && item && this.isDaemonDown && item.routine) {
+      const file = path.join(this.paths.configDir, `${item.id}.toml`)
+      const raw = parse(await fs.readFile(file, 'utf8'))
+      raw.enabled = raw.enabled === false
+      validateRoutine(item.id, raw)
+      await fs.writeFile(file, stringify(raw))
+      this.message = raw.enabled ? 'enabled in file' : 'disabled in file'
+    }
     else if (key === 'r' && item && !this.isDaemonDown) { control(this.paths.socketPath, { cmd: 'run', id: item.id }).catch(() => {}); this.message = 'run started' }
     else if (key === 'l' && item) { this.runSelected = 0; this.view = 'run' }
     else if (key === 'f' && this.view === 'run' && item) {
@@ -201,7 +221,7 @@ export class Manager {
     } else if (key === 'e' && item) await openEditor(path.join(this.paths.configDir, `${item.id}.toml`))
     else if (key === 'm' && item) await openEditor(path.join(this.paths.notesDir, `${item.id}.md`))
     else if (key === 'n') this.message = 'Create conversationally via an agent, or run: herdr-routines create …'
-    else if (key === 'd' && item) { this.pendingDelete = item.id; this.message = `Delete ${item.id}? press y` }
+    else if (key === 'd' && item) { this.pendingDelete = item.id; this.message = `Delete ${item.id}? y/N` }
     else if (key === 'y' && this.pendingDelete) { await fs.unlink(path.join(this.paths.configDir, `${this.pendingDelete}.toml`)); this.pendingDelete = null; this.message = 'deleted' }
     await this.refresh()
     return true
