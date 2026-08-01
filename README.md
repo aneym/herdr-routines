@@ -54,6 +54,7 @@ cwd = "~"
 overlap = "skip"
 busy = "skip"
 timeout_minutes = 30
+detect_timeout_seconds = 120 # agent launcher/detection window; minimum 10
 keep_runs = 3
 
 [delivery]

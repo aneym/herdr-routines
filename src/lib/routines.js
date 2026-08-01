@@ -7,7 +7,7 @@ const ROOT_KEYS = new Set(['name', 'agent', 'prompt', 'enabled', 'trigger', 'run
 const MAX_PROMPT_BYTES = 256 * 1024
 const SECTION_KEYS = {
   trigger: new Set(['kind', 'expr', 'tz', 'every', 'when']),
-  run: new Set(['target', 'workspace', 'cwd', 'overlap', 'timeout_minutes', 'keep_runs', 'busy']),
+  run: new Set(['target', 'workspace', 'cwd', 'overlap', 'timeout_minutes', 'detect_timeout_seconds', 'keep_runs', 'busy']),
   delivery: new Set(['notify', 'ok_token', 'noop_token']),
   failure: new Set(['notify_after', 'renotify_hours', 'auto_pause_after_days']),
   fire: new Set(['token']),
@@ -42,6 +42,8 @@ export function validateRoutine(id, input) {
   if (['interval', 'watch'].includes(input.trigger.kind)) parseDuration(input.trigger.every)
   if (input.trigger.kind === 'at' && Number.isNaN(new Date(input.trigger.when).getTime())) throw new Error('invalid trigger.when')
   const target = input.run?.target || 'isolated'
+  const detectTimeoutSeconds = input.run?.detect_timeout_seconds ?? 120
+  if (!Number.isFinite(detectTimeoutSeconds) || detectTimeoutSeconds < 10) throw new Error('run.detect_timeout_seconds must be at least 10')
   if (target.startsWith('session:')) throw new Error('session target is not in v1')
   if (target !== 'isolated' && !target.startsWith('pane:')) throw new Error('invalid run.target')
   if (input.fire && !input.fire.token) throw new Error('fire.token is required')
@@ -59,6 +61,7 @@ export function validateRoutine(id, input) {
       overlap: input.run?.overlap || 'skip',
       busy: input.run?.busy || 'skip',
       timeout_minutes: input.run?.timeout_minutes ?? 30,
+      detect_timeout_seconds: detectTimeoutSeconds,
       keep_runs: input.run?.keep_runs ?? 3,
     },
     delivery: {

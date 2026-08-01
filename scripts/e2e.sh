@@ -2,7 +2,8 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HERDR="$HOME/.local/bin/herdr"
-SESSION="routineslab-$$"
+SESSION="${HERDR_SESSION:-routineslab-$$}"
+[[ "$SESSION" != default ]] || { printf 'e2e: refusing to run against default herdr session\n' >&2; exit 1; }
 WORK="$ROOT/.e2e-$$"
 CONFIG="$WORK/config"
 STATE="$WORK/state"

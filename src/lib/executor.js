@@ -118,11 +118,11 @@ export async function executeRun(context) {
       if (entry.command) {
         await new Promise((resolve) => setTimeout(resolve, 500))
         await herdrRequest(session, 'pane.send_input', { pane_id: paneId, text: entry.command, keys: ['Enter'] })
-        await waitForReady(session, paneId, entry.kind)
+        await waitForReady(session, paneId, entry.kind, routine.run.detect_timeout_seconds * 1000)
       } else {
         await new Promise((resolve) => setTimeout(resolve, 500))
         await herdrRequest(session, 'agent.start', { name: entry.kind, kind: entry.kind, pane_id: paneId, args: [], timeout_ms: 60000 })
-        await waitForReady(session, paneId, entry.kind)
+        await waitForReady(session, paneId, entry.kind, routine.run.detect_timeout_seconds * 1000)
       }
     }
     try {

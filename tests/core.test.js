@@ -28,6 +28,12 @@ test('missed intervals aggregate once', () => {
   assert.equal(result.missedCount, 4)
 })
 
+test('validation defaults and bounds agent detection timeout', () => {
+  assert.equal(validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', trigger: { kind: 'manual' } }).run.detect_timeout_seconds, 120)
+  assert.equal(validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', trigger: { kind: 'manual' }, run: { detect_timeout_seconds: 180 } }).run.detect_timeout_seconds, 180)
+  assert.throws(() => validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', trigger: { kind: 'manual' }, run: { detect_timeout_seconds: 9 } }), /at least 10/)
+})
+
 test('validation rejects unknowns and unsupported session target', () => {
   assert.throws(() => validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', wat: 1, trigger: { kind: 'manual' } }), /unknown key/)
   assert.throws(() => validateRoutine('x', { name: 'X', agent: 'a', prompt: 'p', trigger: { kind: 'manual' }, run: { target: 'session:key' } }), /not in v1/)
