@@ -47,6 +47,31 @@ async function readTail(session, paneId) {
   }
 }
 
+export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200 }) {
+  const deadline = Date.now() + timeoutMs
+  let hasStarted = false
+  while (Date.now() < deadline) {
+    try {
+      await herdrRequest(session, 'pane.get', { pane_id: paneId })
+      const result = await herdrRequest(session, 'agent.get', { target: paneId })
+      const processResult = await herdrRequest(session, 'pane.process_info', { pane_id: paneId })
+      const processes = processResult.process_info?.foreground_processes || []
+      const isShellOnly = processes.length > 0 && processes.every((process) => /^(zsh|bash|sh|fish)$/.test(process.name))
+      const status = result.agent.agent_status
+      if (hasStarted && status === 'working' && isShellOnly) return { error: new Error('agent exited') }
+      if (status === 'working') hasStarted = true
+      if (status === 'blocked') return { status }
+      if (status === 'done') return { status }
+      if (hasStarted && status === 'idle') return { status }
+    } catch (error) {
+      if (/not found|exited|closed|ENOENT|ECONNREFUSED/i.test(error.message)) return { error: new Error('agent exited') }
+      throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+  }
+  return { waitTimedOut: true }
+}
+
 export async function planRun({ session, routine, runNumber, lastRun, notesPath, payload }) {
   const prompt = assemblePreamble({ routine, runNumber, lastRun, notesPath, payload })
   if (routine.run.target.startsWith('pane:')) {
@@ -79,7 +104,13 @@ export async function executeRun(context) {
         cwd: routine.run.cwd,
         focus: false,
         label: `${routine.name} #${runNumber}`,
-        env: { HERDR_ROUTINE_ID: routine.id, HERDR_ROUTINE_RUN: runId, HERDR_ROUTINE_NOTES: notesPath, HERDR_SESSION: session },
+        env: {
+          HERDR_ROUTINE_ID: routine.id,
+          HERDR_ROUTINE_RUN: runId,
+          HERDR_ROUTINE_NOTES: notesPath,
+          HERDR_SESSION: session,
+          ...(process.env.HERDR_ROUTINES_STUB_MODE === '1' ? { STUBAGENT_CAPTURE: process.env.STUBAGENT_CAPTURE || '' } : {}),
+        },
       })
       tabId = created.tab.tab_id
       paneId = created.root_pane.pane_id
@@ -95,31 +126,28 @@ export async function executeRun(context) {
       }
     }
     try {
+      const timeoutMs = routine.run.timeout_minutes * 60000
       if (process.env.HERDR_ROUTINES_STUB_MODE === '1') {
         await herdrRequest(session, 'pane.send_input', { pane_id: paneId, text: prompt, keys: ['Enter'] })
-        const deadline = Date.now() + routine.run.timeout_minutes * 60000
-        let hasStarted = false
-        while (Date.now() < deadline) {
-          const result = await herdrRequest(session, 'agent.get', { target: paneId })
-          agentStatus = result.agent.agent_status
-          if (agentStatus === 'working') hasStarted = true
-          if ((hasStarted && ['idle', 'done'].includes(agentStatus)) || agentStatus === 'blocked') break
-          await new Promise((resolve) => setTimeout(resolve, 100))
-        }
-        if (!['idle', 'blocked', 'done'].includes(agentStatus)) waitTimedOut = true
       } else {
-        await herdrRequest(session, 'agent.prompt', {
+        herdrRequest(session, 'agent.prompt', {
           target: paneId,
           text: prompt,
-          wait: { until: ['idle', 'blocked'], timeout_ms: routine.run.timeout_minutes * 60000 },
-        })
+          wait: { until: ['idle', 'blocked'], timeout_ms: timeoutMs },
+        }).catch(() => {})
       }
+      const monitored = await monitorRun({ session, paneId, timeoutMs })
+      agentStatus = monitored.status
+      waitTimedOut = monitored.waitTimedOut || false
+      if (monitored.error) throw monitored.error
     } catch (promptError) {
       if (/timeout/i.test(promptError.message)) waitTimedOut = true
       else throw promptError
     }
-    const result = await herdrRequest(session, 'agent.get', { target: paneId })
-    agentStatus = result.agent.agent_status
+    if (!error && !waitTimedOut) {
+      const result = await herdrRequest(session, 'agent.get', { target: paneId })
+      agentStatus = result.agent.agent_status
+    }
   } catch (caught) {
     error = caught
   }

@@ -48,17 +48,22 @@ node -e "const x=require('$WORK/ok.json'); if(x.status!=='ok'||!x.workspace_id||
 
 for pair in 'untagged CASE_UNTAGGED ok_untagged' 'noop CASE_NOOP noop' 'fail CASE_FAIL fail' 'blocked CASE_BLOCKED blocked'; do
   set -- $pair
-  "$ROOT/bin/herdr-routines" create "$1" --name "$1" --agent stubagent --prompt "$2" --every 30s --notify always
+  "$ROOT/bin/herdr-routines" create "$1" --name "$1" --agent stubagent --prompt "$2" --at 2099-01-01T00:00:00Z --notify always
   sleep 6
+  started=$(date +%s)
   "$ROOT/bin/herdr-routines" run "$1" > "$WORK/$1.json"
+  elapsed=$(($(date +%s)-started))
   node -e "const x=require('$WORK/$1.json');if(x.status!=='$3')process.exit(1)"
+  [[ "$1" != fail || "$elapsed" -lt 8 ]]
 done
-"$ROOT/bin/herdr-routines" create timeout --name Timeout --agent stubagent --prompt CASE_TIMEOUT --every 30s --notify always
+"$ROOT/bin/herdr-routines" create timeout --name Timeout --agent stubagent --prompt CASE_TIMEOUT --at 2099-01-01T00:00:00Z --notify always
+sleep 6
 python3 - <<PY
 p='$CONFIG/timeout.toml'
-s=open(p).read()+'\n[run]\ntimeout_minutes = 0.01\n'
+s=open(p).read().replace('target = "isolated"', 'timeout_minutes = 0.01\ntarget = "isolated"')
 open(p,'w').write(s)
 PY
+sleep 6
 "$ROOT/bin/herdr-routines" run timeout > "$WORK/timeout.json"
 node -e "const x=require('$WORK/timeout.json');if(x.status!=='timeout')process.exit(1)"
 
@@ -81,7 +86,7 @@ grep -q '"issue": 42' "$CAPTURE"
 # Retention at keep_runs=3 must leave at most three routine run tabs.
 "$ROOT/bin/herdr-routines" run ok >/dev/null
 "$ROOT/bin/herdr-routines" run ok >/dev/null
-count=$("$HERDR" --session "$SESSION" tab list --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{let x=JSON.parse(s);console.log(x.tabs.filter(t=>/^Ok #/.test(t.label)).length)})")
+count=$("$HERDR" --session "$SESSION" tab list | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{let x=JSON.parse(s);console.log(x.result.tabs.filter(t=>/^Ok #/.test(t.label)).length)})")
 [[ "$count" -le 3 ]]
 
 # Kill -9 and make the persisted next due overdue, then restart: exactly one missed record and no fire.

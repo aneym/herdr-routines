@@ -5,6 +5,7 @@ import { validateRoutine } from '../src/lib/routines.js'
 import { classifyOutcome } from '../src/lib/outcome.js'
 import { assemblePreamble } from '../src/lib/preamble.js'
 import { applyFailurePolicy } from '../src/lib/failure.js'
+import { monitorRun } from '../src/lib/executor.js'
 
 const base = validateRoutine('daily', { name: 'Daily', agent: 'stubagent', prompt: 'work', trigger: { kind: 'cron', expr: '0 9 * * *', tz: 'America/New_York' } })
 
@@ -39,6 +40,11 @@ test('outcome matrix', () => {
   assert.equal(classifyOutcome({ error: new Error('dead') }), 'fail')
   assert.equal(classifyOutcome({ waitTimedOut: true }), 'timeout')
   assert.equal(classifyOutcome({ status: 'blocked' }), 'blocked')
+})
+
+test('monitor classifier resolves an exited pane without hanging', async () => {
+  const result = await monitorRun({ session: 'missing-test-session', paneId: 'w1:p1', timeoutMs: 1000, pollMs: 1 })
+  assert.match(result.error.message, /agent exited/)
 })
 
 test('preamble includes memory, prior run, watch and payload', () => {
