@@ -74,6 +74,32 @@ Definitions live in `$HERDR_ROUTINES_CONFIG_DIR` or `~/.config/herdr/routines`. 
 
 Prompts must be **safe to re-run**. Make work idempotent, state the duplicate-check strategy, describe what counts as no-op, and tell the agent what durable facts belong in its notes file. Fresh isolated runs do not inherit a transcript.
 
+## Manager pane
+
+The plugin exposes the `manager` pane. After linking or installing the plugin, open it with:
+
+```sh
+herdr plugin pane open herdr-routines manager
+```
+
+The pane works without the daemon for browsing definitions and file editing, and displays a persistent daemon-down banner. Live controls require the daemon.
+
+| Key | Action |
+|---|---|
+| `Enter` / `Esc` | Open detail / return |
+| `space` | Pause or resume |
+| `r` | Run now |
+| `l` | Show last output |
+| `e` / `m` | Edit definition / notes |
+| `n` | Show conversational creation guidance |
+| `d`, then `y` | Confirm deletion |
+| `/` | Filter routines |
+| `R` | Refresh |
+| `?` | Help |
+| `q` / `ctrl+c` | Quit |
+
+The list polls local daemon state every two seconds, sorts failures first, and degrades to a single-column presentation below 50 columns.
+
 ## Spec deltas
 
 The installed protocol-18 binary no longer exposes arbitrary raw requests through `herdr api '<json>'`; it only provides `api snapshot` and `api schema`. The daemon therefore speaks the documented JSON-lines protocol directly over the session API socket. Live probes also showed `agent.start` supports only built-in agent kinds, so the test stub uses the roster command/reporting path rather than registering a new executable kind.

@@ -9,3 +9,11 @@ command = ["npm", "install", "--omit=dev"]
 
 [[startup]]
 command = ["node", "src/daemon.js"]
+
+[[panes]]
+id = "manager"
+title = "Routines"
+placement = "split"
+width = 72
+height = 30
+command = ["node", "src/ui.js"]

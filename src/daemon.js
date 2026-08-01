@@ -146,6 +146,15 @@ export class RoutineDaemon {
   async command(request) {
     if (request.cmd === 'status') return { ok: true, pid: process.pid, session: this.session, running: [...this.running] }
     if (request.cmd === 'list') return { ok: true, routines: [...this.routines].map(([id, entry]) => ({ id, invalid: entry.invalid, routine: entry.routine, state: this.state.routines[id] || {} })) }
+    if (request.cmd === 'overview') {
+      const routines = []
+      for (const [id, entry] of this.routines) {
+        const runs = await readRuns(this.paths.runsDir, id, 20)
+        routines.push({ id, invalid: entry.invalid, routine: entry.routine, state: this.state.routines[id] || {}, isRunning: this.running.has(id), runs })
+      }
+      return { ok: true, routines }
+    }
+    if (request.cmd === 'runs') return { ok: true, runs: await readRuns(this.paths.runsDir, request.id, request.n || 20) }
     if (request.cmd === 'reload') { await this.reload(); return { ok: true } }
     if (request.cmd === 'run') return { ok: true, run: await this.run(request.id, 'manual') }
     if (request.cmd === 'fire') {
