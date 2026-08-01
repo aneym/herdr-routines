@@ -30,6 +30,18 @@ test('invalid timezone and oversized prompt are rejected while far-future schedu
   assert.doesNotThrow(() => validateRoutine('cron', { name: 'Cron', agent: 'a', prompt: 'p', trigger: { kind: 'cron', expr: '0 0 1 1 *' } }))
 })
 
+test('daemon startup survives invalid timezone and marks routine invalid', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-invalid-tz-'))
+  const paths = fixturePaths(root)
+  await fs.mkdir(paths.configDir, { recursive: true })
+  await fs.writeFile(path.join(paths.configDir, 'bad.toml'), 'name="Bad"\nagent="a"\nprompt="p"\n[trigger]\nkind="cron"\nexpr="0 9 * * *"\ntz="Not/AZone"\n')
+  const daemon = new RoutineDaemon({ session: 'repair', paths })
+  await daemon.initialize()
+  assert.match(daemon.routines.get('bad').invalid, /invalid cron or timezone/)
+  assert.equal((await daemon.command({ cmd: 'status' })).ok, true)
+  t.after(async () => { await daemon.stop(); await fs.rm(root, { recursive: true, force: true }) })
+})
+
 test('timer delay clamps far-future schedules', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-timer-'))
   const paths = fixturePaths(root)
