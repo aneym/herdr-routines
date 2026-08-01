@@ -20,7 +20,11 @@ async function waitForReady(session, paneId, expectedKind, timeoutMs = 60000) {
     try {
       const result = await herdrRequest(session, 'agent.get', { target: paneId })
       const agent = result.agent
-      if ((process.env.HERDR_ROUTINES_STUB_MODE === '1' || agent?.interactive_ready) && ['idle', 'working', 'blocked'].includes(agent?.agent_status)) return agent
+      // interactive_ready only exists on agent.start-managed agents; detected
+      // roster-command agents omit it entirely, so absent must mean ready.
+      const kindOk = !expectedKind || agent?.agent === expectedKind
+      const readyOk = agent?.interactive_ready === undefined || agent.interactive_ready
+      if (kindOk && readyOk && ['idle', 'working', 'blocked'].includes(agent?.agent_status)) return agent
     } catch (error) {
       if (!error.message.includes('agent target') || !error.message.includes('not found')) throw error
     }
