@@ -51,17 +51,22 @@ async function readTail(session, paneId) {
   }
 }
 
-// If the agent never leaves idle, the prompt may be sitting unsubmitted in the
-// agent's composer (paste landed, Enter lost — observed live with Claude Code).
-// Nudge with bare Enter presses (harmless on an empty composer), then give up.
-const START_NUDGE_DELAYS_MS = [8000, 16000]
-const START_DEADLINE_MS = 60000
+// Prompt delivery into a TUI agent is not transactional — observed live with
+// Claude Code: the paste can be dropped entirely (composer empty) or land
+// without its Enter (composer full, unsubmitted). While the agent has not left
+// idle, verify delivery via the pane text: marker absent → re-send the prompt;
+// marker present → nudge a bare Enter (harmless on an empty composer). Fail
+// fast if the run still hasn't started by the start deadline.
+const START_CHECK_INTERVAL_MS = 5000
+const START_DEADLINE_MS = 75000
+const MAX_RESENDS = 2
 
-export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200 }) {
+export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200, marker, resend }) {
   const deadline = Date.now() + timeoutMs
   const startedAt = Date.now()
   let hasStarted = false
-  let nudgesSent = 0
+  let resendsSent = 0
+  let nextStartCheck = startedAt + START_CHECK_INTERVAL_MS
   while (Date.now() < deadline) {
     try {
       await herdrRequest(session, 'pane.get', { pane_id: paneId })
@@ -75,13 +80,24 @@ export async function monitorRun({ session, paneId, timeoutMs, pollMs = 200 }) {
       if (status === 'blocked') return { status }
       if (status === 'done') return { status }
       if (hasStarted && status === 'idle') return { status }
-      if (!hasStarted) {
-        const waited = Date.now() - startedAt
-        if (nudgesSent < START_NUDGE_DELAYS_MS.length && waited >= START_NUDGE_DELAYS_MS[nudgesSent]) {
-          nudgesSent += 1
+      if (!hasStarted && Date.now() >= nextStartCheck) {
+        nextStartCheck = Date.now() + START_CHECK_INTERVAL_MS
+        let paneText = ''
+        try {
+          const read = await herdrRequest(session, 'pane.read', { pane_id: paneId, source: 'visible', format: 'text' })
+          paneText = read.read?.text || ''
+        } catch {}
+        if (marker && !paneText.includes(marker)) {
+          if (resend && resendsSent < MAX_RESENDS) {
+            resendsSent += 1
+            await resend()
+          }
+        } else {
           await herdrRequest(session, 'pane.send_keys', { pane_id: paneId, keys: ['Enter'] }).catch(() => {})
         }
-        if (waited >= START_DEADLINE_MS) return { error: new Error('prompt never started (agent stayed idle)') }
+        if (Date.now() - startedAt >= START_DEADLINE_MS) {
+          return { error: new Error(`prompt never started (agent stayed idle; resends=${resendsSent})`) }
+        }
       }
     } catch (error) {
       if (/not found|exited|closed|ENOENT|ECONNREFUSED/i.test(error.message)) return { error: new Error('agent exited') }
@@ -147,16 +163,22 @@ export async function executeRun(context) {
     }
     try {
       const timeoutMs = routine.run.timeout_minutes * 60000
-      if (process.env.HERDR_ROUTINES_STUB_MODE === '1') {
-        await herdrRequest(session, 'pane.send_input', { pane_id: paneId, text: prompt, keys: ['Enter'] })
-      } else {
+      const sendPrompt = async () => {
+        if (process.env.HERDR_ROUTINES_STUB_MODE === '1') {
+          await herdrRequest(session, 'pane.send_input', { pane_id: paneId, text: prompt, keys: ['Enter'] })
+          return
+        }
         herdrRequest(session, 'agent.prompt', {
           target: paneId,
           text: prompt,
           wait: { until: ['idle', 'blocked'], timeout_ms: timeoutMs },
         }).catch(() => {})
       }
-      const monitored = await monitorRun({ session, paneId, timeoutMs })
+      // Detection-based readiness can precede the agent TUI accepting input;
+      // observed live: the paste is dropped entirely, or lands without Enter.
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await sendPrompt()
+      const monitored = await monitorRun({ session, paneId, timeoutMs, marker: 'herdr routine:', resend: sendPrompt })
       agentStatus = monitored.status
       waitTimedOut = monitored.waitTimedOut || false
       if (monitored.error) throw monitored.error
