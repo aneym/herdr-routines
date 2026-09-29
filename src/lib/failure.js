@@ -1,6 +1,15 @@
 const FAILURES = new Set(['fail', 'timeout'])
 const SUCCESSES = new Set(['ok', 'ok_untagged', 'noop'])
 
+export function applyRunOutcome(liveState, status, config, now = new Date()) {
+  const decision = applyFailurePolicy(liveState, status, config, now)
+  for (const key of Object.keys(liveState)) {
+    if (!Object.hasOwn(decision.state, key)) delete liveState[key]
+  }
+  Object.assign(liveState, decision.state)
+  return decision
+}
+
 export function applyFailurePolicy(previous = {}, status, config, now = new Date()) {
   const state = { ...previous }
   if (SUCCESSES.has(status)) {

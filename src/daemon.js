@@ -11,7 +11,7 @@ import { loadState, saveState } from './lib/state.js'
 import { nextRunAt, accountMissed } from './lib/schedule.js'
 import { appendRun, readRuns } from './lib/runstore.js'
 import { executeRun } from './lib/executor.js'
-import { applyFailurePolicy } from './lib/failure.js'
+import { applyRunOutcome } from './lib/failure.js'
 import { notify, shouldNotify } from './lib/notify.js'
 import { constantTimeToken } from './lib/herdr.js'
 import { logLine } from './lib/log.js'
@@ -91,6 +91,7 @@ export class RoutineDaemon {
       if (entry.invalid) { await this.log(id, `invalid: ${entry.invalid}`); continue }
       const routineState = this.state.routines[id] ||= {}
       if (isStartup) {
+        if (!entry.routine.enabled || routineState.paused) continue
         const accounting = accountMissed(entry.routine, routineState.nextRunAt, now)
         if (accounting.missedCount) {
           const record = { ts: now.toISOString(), run_id: crypto.randomUUID(), routine_id: id, trigger: entry.routine.trigger.kind, status: 'missed', missed_count: accounting.missedCount, duration_ms: 0, summary: `missed ${accounting.missedCount} scheduled run(s)`, next_run_at: accounting.next?.toISOString() || null }
@@ -157,8 +158,7 @@ export class RoutineDaemon {
       const result = await executeRun({ session: this.session, routine, runId, runNumber, lastRun: runs.at(-1), notesPath: path.join(this.paths.notesDir, `${id}.md`), payload })
       Object.assign(marker, { workspace_id: result.workspaceId, tab_id: result.tabId, pane_id: result.paneId })
       const liveState = this.state.routines[id] ||= {}
-      const failureDecision = applyFailurePolicy(liveState, result.status, routine.failure)
-      Object.assign(liveState, failureDecision.state)
+      const failureDecision = applyRunOutcome(liveState, result.status, routine.failure)
       const record = { ts: new Date().toISOString(), run_id: runId, routine_id: id, trigger, status: result.status, duration_ms: result.durationMs, summary: result.summary, output_tail: result.outputTail, workspace_id: result.workspaceId, tab_id: result.tabId, pane_id: result.paneId, next_run_at: liveState.nextRunAt || null }
       await appendRun(this.paths.runsDir, record)
       await this.log(id, `${trigger} ${result.status} run=${runId}`)

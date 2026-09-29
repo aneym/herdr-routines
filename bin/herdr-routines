@@ -128,14 +128,20 @@ try {
   } else if (command === 'status') {
     console.log(JSON.stringify(await ctl(paths, { cmd: 'status' }), null, 2))
   } else if (command === 'doctor') {
-    const checks = { configReadable: true, rosterPresent: true, daemonUp: true, sessionReachable: true, invalidRoutines: [] }
+    const checks = { configReadable: true, rosterPresent: true, daemonUp: true, sessionReachable: true, invalidRoutines: [], pausedRoutines: [] }
     try { await fs.access(paths.configDir) } catch { checks.configReadable = false }
     try { await fs.access(process.env.HERDR_ROUTINES_ROSTER || path.join(process.env.HOME, '.config/herdr/spawn-agents.conf')) } catch { checks.rosterPresent = false }
-    try { await ctl(paths, { cmd: 'status' }) } catch { checks.daemonUp = false }
+    let routineStates
+    try { routineStates = (await ctl(paths, { cmd: 'list' })).routines.map(({ id, state }) => ({ id, state })) }
+    catch {
+      checks.daemonUp = false
+      routineStates = Object.entries((await loadState(paths.stateFile)).routines).map(([id, state]) => ({ id, state }))
+    }
+    checks.pausedRoutines = routineStates.filter(({ state }) => state.paused).map(({ id, state }) => ({ id, paused: state.paused, failingSince: state.failingSince || null }))
     try { await fs.access(session === 'default' ? path.join(process.env.HOME, '.config/herdr/herdr.sock') : path.join(process.env.HOME, '.config/herdr/sessions', session, 'herdr.sock')) } catch { checks.sessionReachable = false }
     for (const [routineId, entry] of await loadRoutines(paths.configDir)) if (entry.invalid) checks.invalidRoutines.push({ id: routineId, error: entry.invalid })
     console.log(JSON.stringify(checks, null, 2))
-    if (!checks.configReadable || !checks.rosterPresent || !checks.daemonUp || !checks.sessionReachable || checks.invalidRoutines.length) process.exitCode = 1
+    if (!checks.configReadable || !checks.rosterPresent || !checks.daemonUp || !checks.sessionReachable || checks.invalidRoutines.length || checks.pausedRoutines.some(({ paused }) => paused === 'auto')) process.exitCode = 1
   } else throw new Error('usage: herdr-routines list|get|create|edit|enable|disable|pause|resume|run|fire|runs|logs|notes|delete|status|doctor')
 } catch (error) {
   console.error(error.message)
