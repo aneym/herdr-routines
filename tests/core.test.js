@@ -97,6 +97,64 @@ test('classifyOutcome finds token above TUI chrome, ignores echoed prompt', () =
   )
   assert.equal(
     lastMeaningfulLine(tail, 200, ['ROUTINE_OK', 'ROUTINE_NOOP']),
-    '⏺ Disk health check done — both metrics are within thresholds.'
+    'Disk health check done — both metrics are within thresholds.'
   )
+})
+
+test('routine summary selects the last assistant message, not wrapped tails or chrome', () => {
+  const cases = [
+    {
+      tail: [
+        '⏺ Checked the routine runs and',
+        '  updated the notes. The report was',
+        '  posted.',
+        '  ROUTINE_OK',
+        '⎇ main · ┄┄┄┄ · Fable 5.1',
+        'paste again to expand',
+      ],
+      expected: 'Checked the routine runs and updated the notes. The report was posted.',
+    },
+    {
+      tail: ['⏺ Disk fine, notes updated.', '', '⏺ ROUTINE_NOOP'],
+      expected: 'Disk fine, notes updated.',
+    },
+    {
+      tail: [
+        'Nothing deleted.',
+        '⎇ main · ┄┄┄┄ · Fable 5.1',
+        '◯ contrib-sweep Read-only sweep idle',
+        '○ other-agent idle',
+        'Enter to confirm · Esc to cancel',
+        'focus',
+        '╭── ┄━ │ ╮╰╯',
+        '⏵⏵ bypass permissions on',
+        '  paste again to expand (hint)',
+      ],
+      expected: 'Nothing deleted.',
+    },
+    {
+      tail: ['⏺ Old reply.', '', '⏺ Latest reply', '  continued. ROUTINE_OK', '⏺ After the outcome.'],
+      expected: 'Latest reply continued.',
+    },
+    {
+      tail: ['⏺ First reply.', '', '⏺ Latest reply', '  continued.', '❯ Next prompt'],
+      expected: 'Latest reply continued.',
+    },
+    {
+      tail: ['⏺ Reply.', '', 'Unrelated text.'],
+      expected: 'Reply.',
+    },
+    {
+      tail: ['⏺ Reply.', '⎇ main', 'Unrelated text.'],
+      expected: 'Reply.',
+    },
+    {
+      tail: ['⏺ Reply. ROUTINE_OK'],
+      expected: 'Reply.',
+    },
+  ]
+  for (const { tail, expected } of cases) {
+    assert.equal(lastMeaningfulLine(tail.join('\n'), 200, ['ROUTINE_OK', 'ROUTINE_NOOP']), expected)
+  }
+  assert.equal(lastMeaningfulLine(`⏺ ${'a'.repeat(210)}\nROUTINE_OK`, 200, ['ROUTINE_OK']), 'a'.repeat(200))
 })
