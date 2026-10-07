@@ -257,11 +257,13 @@ test('semantic watch: durable baseline, no idle calls, retried judgment, one ded
   const runs = (await fs.readFile(runsFile, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse)
   assert.ok(runs.every((run) => !run.tab_id && !run.pane_id), 'no run record points at an agent tab or pane')
 
-  // 8. Page text is data: it reaches Jev only inside state, never in question instructions.
+  // 8. Page text is data: it reaches Jev inside state (and as choice labels), never in instructions.
   for (const call of jev.calls) {
-    const questions = JSON.stringify(call.body.questions)
-    assert.ok(!questions.includes('rm -rf') && !questions.includes('Status: building'), 'page text never enters question instructions')
     assert.ok(call.body.questions.relevant, 'the relevance question is asked')
+    for (const question of Object.values(call.body.questions)) {
+      const instructions = JSON.stringify(question.instructions)
+      for (const line of [...BUILDING, ...READY]) assert.ok(!instructions.includes(line), `page text never enters question instructions: ${line}`)
+    }
   }
 
   // 9. The CLI lists the same single item.
