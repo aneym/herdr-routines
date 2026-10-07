@@ -31,6 +31,14 @@ test('detail renders definition, exact prompt, and run history', () => {
   assert.match(text, /done/)
 })
 
+test('detail renders a semantic watch with its URL and intent', () => {
+  const watch = { name: 'Deploy ready', watch: { url: 'https://example.com/status', intent: 'tell me when it becomes ready' }, trigger: { kind: 'watch', every: '1h' }, run: { target: 'isolated', workspace: 'routines' } }
+  const text = renderDetail({ id: 'deploy', routine: watch, state: {}, runs: [] }, 80)
+  assert.match(text, /watch https:\/\/example\.com\/status/)
+  assert.match(text, /INTENT\S*\ntell me when it becomes ready/)
+  assert.doesNotMatch(text, /agent undefined/)
+})
+
 test('detail and run output scroll through long content', () => {
   const longItem = { ...items[2], routine: { ...routine, prompt: Array.from({ length: 40 }, (_, index) => `prompt-${index}`).join('\n') }, runs: [{ ...items[2].runs[0], output_tail: Array.from({ length: 40 }, (_, index) => `output-${index}`).join('\n') }] }
   assert.match(renderDetail(longItem, 80, 20, 10), /prompt-2[0-9]/)

@@ -23,7 +23,7 @@ async function apiKey() {
 }
 
 export async function readNeedsItems(file) {
-  try { return (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean).map(JSON.parse) }
+  try { return (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)] } catch { return [] } }) }
   catch (error) { if (error.code === 'ENOENT') return []; throw error }
 }
 

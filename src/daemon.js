@@ -25,6 +25,7 @@ export class RoutineDaemon {
     this.state = { routines: {} }
     this.running = new Set()
     this.watching = new Set()
+    this.legacyLogged = new Set()
     this.timer = null
     this.pollTimer = null
     this.server = null
@@ -91,7 +92,7 @@ export class RoutineDaemon {
     const now = new Date()
     for (const [id, entry] of this.routines) {
       if (entry.invalid) { await this.log(id, `invalid: ${entry.invalid}`); continue }
-      if (entry.routine.legacy_watch) await this.log(id, 'legacy watch runs as interval; set kind = "interval"')
+      if (entry.routine.legacy_watch && !this.legacyLogged.has(id)) { this.legacyLogged.add(id); await this.log(id, 'legacy watch runs as interval; set kind = "interval"') }
       const routineState = this.state.routines[id] ||= {}
       if (isStartup) {
         if (!entry.routine.enabled || routineState.paused) continue
@@ -195,6 +196,9 @@ export class RoutineDaemon {
         catch (error) { await this.log(id, `notification.show: ${error.message}`) }
       }
       return record
+    } catch (error) {
+      await this.log(id, `watch error: ${error.message}`)
+      return { ...record, status: 'watch_error', summary: error.message, duration_ms: Date.now() - started }
     } finally {
       this.watching.delete(id)
     }

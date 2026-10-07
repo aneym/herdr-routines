@@ -111,10 +111,10 @@ export function renderDetail(item, columns = 80, offset = 0, rows = 30) {
   const lines = [
     `${INK}${routine.name}${RESET}  ${item.state.paused ? `${SECONDARY}${item.state.paused}-paused${RESET}` : `${GOOD}enabled${RESET}`}`,
     `${routine.trigger.kind} ${schedule}${routine.trigger.tz ? ` · ${routine.trigger.tz}` : ''}`,
-    `agent ${routine.agent} · ${routine.run.target} · ${routine.run.workspace}`,
+    routine.watch ? `watch ${routine.watch.url}` : `agent ${routine.agent} · ${routine.run.target} · ${routine.run.workspace}`,
     `next ${item.state.nextRunAt || 'none'} · ${relativeTime(item.state.nextRunAt)}`,
     `last ${last?.status || 'never'}${last ? ` · ${relativeTime(last.ts)} · ${last.duration_ms}ms` : ''} · streak ${item.state.failureStreak || 0}`,
-    '', `${ACCENT}PROMPT${RESET}`, ...routine.prompt.split('\n').map((line) => line.slice(0, columns)),
+    '', `${ACCENT}${routine.watch ? 'INTENT' : 'PROMPT'}${RESET}`, ...(routine.watch?.intent ?? routine.prompt).split('\n').map((line) => line.slice(0, columns)),
     '', `${ACCENT}RUNS${RESET}`,
   ]
   for (const run of item.runs.slice(-20).reverse()) lines.push(`${run.status.padEnd(16)} ${relativeTime(run.ts).padEnd(10)} ${String(run.duration_ms || 0).padStart(6)}ms  ${(run.summary || '').slice(0, Math.max(5, columns - 45))}`)
