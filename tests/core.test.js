@@ -53,11 +53,10 @@ test('monitor classifier resolves an exited pane without hanging', async () => {
   assert.match(result.error.message, /agent exited/)
 })
 
-test('preamble includes memory, prior run, watch and payload', () => {
+test('preamble includes memory, prior run and payload', () => {
   const routine = validateRoutine('w', { name: 'W', agent: 'a', prompt: 'scan', trigger: { kind: 'watch', every: '1h' } })
   const text = assemblePreamble({ routine, runNumber: 2, lastRun: { status: 'ok', ts: 'then', summary: 'done' }, notesPath: '/notes/w.md', payload: { value: 1 } })
   assert.match(text, /read it first/)
-  assert.match(text, /nothing meaningful changed/)
   assert.match(text, /"value": 1/)
 })
 

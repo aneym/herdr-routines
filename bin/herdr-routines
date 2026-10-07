@@ -7,6 +7,7 @@ import { stringify, parse } from 'smol-toml'
 import { getPaths } from '../src/lib/paths.js'
 import { loadRoutines, writeRoutine } from '../src/lib/routines.js'
 import { loadState } from '../src/lib/state.js'
+import { readNeedsItems } from '../src/lib/watch.js'
 import { readRuns } from '../src/lib/runstore.js'
 import { assemblePreamble } from '../src/lib/preamble.js'
 
@@ -61,7 +62,10 @@ const paths = getPaths(session)
 const [command, id] = positional
 
 try {
-  if (command === 'list') {
+  if (command === 'needs') {
+    const items = await readNeedsItems(paths.needsFile)
+    console.log(flags.json ? JSON.stringify(items, null, 2) : items.map((item) => `${item.ts} ${item.title} ${item.url}`).join('\n'))
+  } else if (command === 'list') {
     const routines = await loadRoutines(paths.configDir)
     const state = await loadState(paths.stateFile)
     const rows = []
@@ -76,9 +80,12 @@ try {
     if (!entry) throw new Error(`routine not found: ${id}`)
     console.log(JSON.stringify({ ...entry, state: (await loadState(paths.stateFile)).routines[id], runs: await readRuns(paths.runsDir, id, 10) }, null, 2))
   } else if (command === 'create') {
-    if (!id || !flags.name || !flags.agent || (!flags.prompt && !flags['prompt-file'])) throw new Error('create requires id, --name, --agent, and --prompt or --prompt-file')
-    const prompt = flags.prompt ?? await fs.readFile(flags['prompt-file'], 'utf8')
-    const routine = { name: flags.name, agent: flags.agent, prompt, enabled: !flags.disabled, trigger: triggerFromFlags(flags), run: { target: flags.target || 'isolated', workspace: flags.workspace || '⚡ routines', cwd: flags.cwd || '~' }, delivery: { notify: flags.notify || 'always' } }
+    if (flags.watch && (!flags.url || !flags.intent)) throw new Error('--watch requires --url and --intent; use --every for an agent on a timer')
+    if (!id || !flags.name) throw new Error('create requires id and --name')
+    if (!flags.watch && (!flags.agent || (!flags.prompt && !flags['prompt-file']))) throw new Error('create requires --agent and --prompt or --prompt-file')
+    if (['cron', 'every', 'at', 'watch'].filter((key) => flags[key]).length > 1) throw new Error('pass only one trigger: --cron, --every, --at, or --watch')
+    const prompt = flags.watch ? undefined : flags.prompt ?? await fs.readFile(flags['prompt-file'], 'utf8')
+    const routine = { name: flags.name, ...(flags.watch ? { watch: { url: flags.url, intent: flags.intent } } : { agent: flags.agent, prompt }), enabled: !flags.disabled, trigger: triggerFromFlags(flags), run: { target: flags.target || 'isolated', workspace: flags.workspace || '⚡ routines', cwd: flags.cwd || '~' }, delivery: { notify: flags.notify || 'always' } }
     console.log(await writeRoutine(paths.configDir, id, routine, flags.force))
   } else if (command === 'edit') {
     const file = path.join(paths.configDir, `${id}.toml`)
@@ -104,9 +111,13 @@ try {
     if (flags['dry-run']) {
       const entry = (await loadRoutines(paths.configDir)).get(id)
       if (!entry?.routine) throw new Error(entry?.invalid || `routine not found: ${id}`)
-      const runs = await readRuns(paths.runsDir, id, 1)
-      const prompt = assemblePreamble({ routine: entry.routine, runNumber: ((await loadState(paths.stateFile)).routines[id]?.runCount || 0) + 1, lastRun: runs.at(-1), notesPath: path.join(paths.notesDir, `${id}.md`) })
-      console.log(`${prompt}\n\nPlanned API calls: workspace.list/create, tab.create, agent start/detect, agent.prompt, agent.read, notification.show, tab.close(retention)`)
+      if (entry.routine.watch) {
+        console.log(`URL: ${entry.routine.watch.url}\nIntent: ${entry.routine.watch.intent}\nno agent; samples and calls Jev only on change`)
+      } else {
+        const runs = await readRuns(paths.runsDir, id, 1)
+        const prompt = assemblePreamble({ routine: entry.routine, runNumber: ((await loadState(paths.stateFile)).routines[id]?.runCount || 0) + 1, lastRun: runs.at(-1), notesPath: path.join(paths.notesDir, `${id}.md`) })
+        console.log(`${prompt}\n\nPlanned API calls: workspace.list/create, tab.create, agent start/detect, agent.prompt, agent.read, notification.show, tab.close(retention)`)
+      }
     } else console.log(JSON.stringify((await ctl(paths, { cmd: 'run', id })).run, null, 2))
   } else if (command === 'fire') {
     const payload = flags['payload-json'] ? JSON.parse(flags['payload-json']) : undefined
@@ -142,7 +153,7 @@ try {
     for (const [routineId, entry] of await loadRoutines(paths.configDir)) if (entry.invalid) checks.invalidRoutines.push({ id: routineId, error: entry.invalid })
     console.log(JSON.stringify(checks, null, 2))
     if (!checks.configReadable || !checks.rosterPresent || !checks.daemonUp || !checks.sessionReachable || checks.invalidRoutines.length || checks.pausedRoutines.some(({ paused }) => paused === 'auto')) process.exitCode = 1
-  } else throw new Error('usage: herdr-routines list|get|create|edit|enable|disable|pause|resume|run|fire|runs|logs|notes|delete|status|doctor')
+  } else throw new Error('usage: herdr-routines list|needs|get|create|edit|enable|disable|pause|resume|run|fire|runs|logs|notes|delete|status|doctor')
 } catch (error) {
   console.error(error.message)
   process.exitCode = error.daemonDown ? 2 : 1

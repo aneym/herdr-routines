@@ -13,7 +13,8 @@ import { appendRun, readRuns } from './lib/runstore.js'
 import { executeRun } from './lib/executor.js'
 import { applyRunOutcome } from './lib/failure.js'
 import { notify, shouldNotify } from './lib/notify.js'
-import { constantTimeToken } from './lib/herdr.js'
+import { sampleWatch, readNeedsItems } from './lib/watch.js'
+import { constantTimeToken, herdrRequest } from './lib/herdr.js'
 import { logLine } from './lib/log.js'
 
 export class RoutineDaemon {
@@ -23,6 +24,7 @@ export class RoutineDaemon {
     this.routines = new Map()
     this.state = { routines: {} }
     this.running = new Set()
+    this.watching = new Set()
     this.timer = null
     this.pollTimer = null
     this.server = null
@@ -89,6 +91,7 @@ export class RoutineDaemon {
     const now = new Date()
     for (const [id, entry] of this.routines) {
       if (entry.invalid) { await this.log(id, `invalid: ${entry.invalid}`); continue }
+      if (entry.routine.legacy_watch) await this.log(id, 'legacy watch runs as interval; set kind = "interval"')
       const routineState = this.state.routines[id] ||= {}
       if (isStartup) {
         if (!entry.routine.enabled || routineState.paused) continue
@@ -144,7 +147,8 @@ export class RoutineDaemon {
     const routine = entry.routine
     const routineState = this.state.routines[id] ||= {}
     if (routineState.paused) throw new Error(`routine paused: ${id}`)
-    if (this.running.has(id)) return await this.recordSkip(routine, trigger, 'skipped_overlap')
+    if (routine.watch) return await this.runWatch(routine, routineState, trigger)
+    if (this.running.has(id) || this.watching.has(id)) return await this.recordSkip(routine, trigger, 'skipped_overlap')
     if (this.running.size >= 2) return await this.recordSkip(routine, trigger, 'skipped_busy')
     this.running.add(id)
     const runs = await readRuns(this.paths.runsDir, id, 1)
@@ -172,6 +176,30 @@ export class RoutineDaemon {
     }
   }
 
+  async runWatch(routine, routineState, trigger) {
+    const id = routine.id
+    const started = Date.now()
+    const record = { ts: new Date().toISOString(), run_id: crypto.randomUUID(), routine_id: id, trigger, duration_ms: 0, next_run_at: routineState.nextRunAt || null }
+    if (this.watching.has(id) || this.running.has(id)) return { ...record, status: 'skipped_overlap', summary: 'skipped_overlap' }
+    this.watching.add(id)
+    try {
+      const result = await sampleWatch({ routine, routineState, paths: this.paths, session: this.session, log: (message) => this.log(id, message), save: () => saveState(this.paths.stateFile, this.state) })
+      await saveState(this.paths.stateFile, this.state)
+      Object.assign(record, { status: result.status, digest: result.digest, relevant: result.relevant, item_key: result.item_key, summary: result.error || result.line || result.title || result.status, duration_ms: Date.now() - started })
+      if (result.status !== 'unchanged') {
+        await appendRun(this.paths.runsDir, record)
+        await this.log(id, `${trigger} ${result.status} run=${record.run_id}`)
+      }
+      if (result.added) {
+        try { await herdrRequest(this.session, 'notification.show', { title: result.title, sound: 'request' }) }
+        catch (error) { await this.log(id, `notification.show: ${error.message}`) }
+      }
+      return record
+    } finally {
+      this.watching.delete(id)
+    }
+  }
+
   async recordSkip(routine, trigger, status) {
     const record = { ts: new Date().toISOString(), run_id: crypto.randomUUID(), routine_id: routine.id, trigger, status, duration_ms: 0, summary: status, next_run_at: this.state.routines[routine.id]?.nextRunAt || null }
     await appendRun(this.paths.runsDir, record)
@@ -192,13 +220,14 @@ export class RoutineDaemon {
   }
 
   async command(request) {
-    if (request.cmd === 'status') return { ok: true, pid: process.pid, session: this.session, running: [...this.running] }
+    if (request.cmd === 'needs') return { ok: true, items: await readNeedsItems(this.paths.needsFile) }
+    if (request.cmd === 'status') return { ok: true, pid: process.pid, session: this.session, running: [...this.running, ...this.watching] }
     if (request.cmd === 'list') return { ok: true, routines: [...this.routines].map(([id, entry]) => ({ id, invalid: entry.invalid, routine: entry.routine, state: this.state.routines[id] || {} })) }
     if (request.cmd === 'overview') {
       const routines = []
       for (const [id, entry] of this.routines) {
         const runs = await readRuns(this.paths.runsDir, id, 20)
-        routines.push({ id, invalid: entry.invalid, routine: entry.routine, state: this.state.routines[id] || {}, isRunning: this.running.has(id), runs })
+        routines.push({ id, invalid: entry.invalid, routine: entry.routine, state: this.state.routines[id] || {}, isRunning: this.running.has(id) || this.watching.has(id), runs })
       }
       return { ok: true, routines }
     }

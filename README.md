@@ -17,7 +17,9 @@ Global flags: `--session NAME` selects a herdr session and `--json` selects JSON
 
 - `list`: state, last result, and next run for every routine.
 - `get ID`: definition, runtime state, and last ten runs.
-- `create ID --name N --agent A --prompt P|--prompt-file F --cron E|--every D|--at T|--watch D [--tz Z --workspace W --cwd C --target T --notify P --enabled --force]`.
+- `create ID --name N --agent A --prompt P|--prompt-file F --cron E|--every D|--at T [--tz Z --workspace W --cwd C --target T --notify P --enabled --force]`.
+- `create ID --name N --watch D --url U --intent I`: create a semantic watch.
+- `needs [--json]`: list Needs-you items, even with the daemon down.
 - `edit ID`: open the TOML in `$EDITOR`.
 - `enable|disable ID`: edit the persistent enabled flag.
 - `pause|resume ID`: control a running daemon; with it down, edit enabled and add a note.
@@ -74,6 +76,22 @@ token = "secret"
 Definitions live in `$HERDR_ROUTINES_CONFIG_DIR` or `~/.config/herdr/routines`. State defaults to `~/.local/state/herdr-routines/<session>`. `_daemon.toml` is reserved; `[http] port = N` enables localhost-only `POST /fire/<id>` with a bearer token.
 
 Prompts must be **safe to re-run**. Make work idempotent, state the duplicate-check strategy, describe what counts as no-op, and tell the agent what durable facts belong in its notes file. Fresh isolated runs do not inherit a transcript.
+
+## Semantic watches
+
+```toml
+name = "deploy ready"
+[trigger]
+kind = "watch"
+every = "1h"
+[watch]
+url = "https://example.com/status"
+intent = "tell me when it becomes ready"
+```
+
+Watches never start an agent. They sample text, keep a durable baseline, and call Jev only on change. Failed judgments stay pending for retry; relevant changes produce deduplicated Needs-you items and one notification. `agent` and `prompt` are ignored. Legacy watches without `[watch]` run as intervals; use `kind = "interval"` for an agent on a timer.
+
+Set `TYPESAFE_API_KEY`, or store `typesafe-api-key` in `agent-secret`. `HERDR_ROUTINES_JEV_URL` overrides the default `https://api.typesafe.ai` provider. `herdr-routines needs --json` reads the durable `needs-you.jsonl` in the state directory.
 
 ## Manager pane
 

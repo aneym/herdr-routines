@@ -18,6 +18,7 @@ export function getPaths(session = process.env.HERDR_SESSION || 'default') {
     stateDir,
     runsDir: path.join(stateDir, 'runs'),
     notesDir: path.join(stateDir, 'notes'),
+    needsFile: path.join(stateDir, 'needs-you.jsonl'),
     stateFile: path.join(stateDir, 'state.json'),
     socketPath: path.join(os.tmpdir(), `hr-${socketHash}.sock`),
     socketMapFile: path.join(stateDir, 'ctl.sock.path'),

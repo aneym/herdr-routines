@@ -47,7 +47,7 @@ test('seven days of continuous failures still auto-pause the live state', () => 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'routine-auto-pause-'))
   const stateDir = path.join(root, 'state')
-  const paths = { ...getPaths('auto-pause-test'), configDir: path.join(root, 'config'), stateDir, runsDir: path.join(stateDir, 'runs'), notesDir: path.join(stateDir, 'notes'), stateFile: path.join(stateDir, 'state.json'), socketPath: path.join(root, 'ctl.sock'), socketMapFile: path.join(stateDir, 'ctl.sock.path'), inFlightFile: path.join(stateDir, 'in-flight.json'), logFile: path.join(stateDir, 'daemon.log') }
+  const paths = { ...getPaths('auto-pause-test'), configDir: path.join(root, 'config'), stateDir, runsDir: path.join(stateDir, 'runs'), notesDir: path.join(stateDir, 'notes'), stateFile: path.join(stateDir, 'state.json'), needsFile: path.join(stateDir, 'needs-you.jsonl'), socketPath: path.join(root, 'ctl.sock'), socketMapFile: path.join(stateDir, 'ctl.sock.path'), inFlightFile: path.join(stateDir, 'in-flight.json'), logFile: path.join(stateDir, 'daemon.log') }
   // Unix sockets must stay short even when TMPDIR points at a long scratch path.
   paths.socketPath = getPathsForState(stateDir).socketPath
   await fs.mkdir(paths.configDir, { recursive: true })

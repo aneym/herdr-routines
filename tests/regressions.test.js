@@ -10,7 +10,7 @@ import { RoutineDaemon } from '../src/daemon.js'
 
 function fixturePaths(root) {
   const stateDir = path.join(root, 'state')
-  return { ...getPaths('repair'), configDir: path.join(root, 'config'), stateDir, runsDir: path.join(stateDir, 'runs'), notesDir: path.join(stateDir, 'notes'), stateFile: path.join(stateDir, 'state.json'), socketMapFile: path.join(stateDir, 'ctl.sock.path'), inFlightFile: path.join(stateDir, 'in-flight.json'), logFile: path.join(stateDir, 'daemon.log') }
+  return { ...getPaths('repair'), configDir: path.join(root, 'config'), stateDir, runsDir: path.join(stateDir, 'runs'), notesDir: path.join(stateDir, 'notes'), stateFile: path.join(stateDir, 'state.json'), needsFile: path.join(stateDir, 'needs-you.jsonl'), socketMapFile: path.join(stateDir, 'ctl.sock.path'), inFlightFile: path.join(stateDir, 'in-flight.json'), logFile: path.join(stateDir, 'daemon.log') }
 }
 
 test('ctl socket remains short for a deeply nested state directory', () => {
