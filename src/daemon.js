@@ -53,7 +53,7 @@ export class RoutineDaemon {
     const now = Date.now()
     if (now - (this.lastLogs.get(key) || 0) < 60000) return
     this.lastLogs.set(key, now)
-    await logLine(this.paths.logFile, id, message)
+    try { await logLine(this.paths.logFile, id, message) } catch {}
   }
 
   async reconcileOrphans() {

@@ -131,7 +131,7 @@ async function readJson(file) { return JSON.parse(await fs.readFile(file, 'utf8'
 async function watchState(stateDir) { return (await readJson(path.join(stateDir, 'state.json'))).routines?.[ID]?.watch }
 
 async function needsItems(stateDir) {
-  try { return (await fs.readFile(path.join(stateDir, 'needs-you.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) }
+  try { return (await fs.readFile(path.join(stateDir, 'needs-you.jsonl'), 'utf8')).trim().split('\n').flatMap((line) => { try { return [JSON.parse(line)] } catch { return [] } }) }
   catch (error) { if (error.code === 'ENOENT') return []; throw error }
 }
 
@@ -213,8 +213,9 @@ test('semantic watch: durable baseline, no idle calls, retried judgment, one ded
   assert.equal(watch.pending.digest, pendingDigest, 'the pending change is the same one')
   assert.deepEqual(await needsItems(stateDir), [], 'no Needs-you item without a judgment')
 
-  // 4. Crash and restart the daemon; the provider recovers.
+  // 4. Crash and restart the daemon, leaving a torn needs-you line as a crash mid-append would; the provider recovers.
   await stopDaemon(daemon, 'SIGKILL')
+  await fs.writeFile(path.join(stateDir, 'needs-you.jsonl'), '{"id":"torn-by-crash","key":"')
   daemon = await startDaemon(env, daemonLog)
   watch = await watchState(stateDir)
   assert.equal(watch.pending?.digest, pendingDigest, 'the pending change survives a daemon restart')

@@ -30,7 +30,10 @@ export async function readNeedsItems(file) {
 export async function addNeedsItem(file, item) {
   if ((await readNeedsItems(file)).some((existing) => existing.key === item.key)) return false
   await fs.mkdir(path.dirname(file), { recursive: true })
-  await fs.appendFile(file, `${JSON.stringify(item)}\n`)
+  // A crash mid-append leaves a line without its newline; start a fresh line so this item stays readable.
+  let tail = ''
+  try { tail = (await fs.readFile(file, 'utf8')).slice(-1) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  await fs.appendFile(file, `${tail && tail !== '\n' ? '\n' : ''}${JSON.stringify(item)}\n`)
   return true
 }
 
